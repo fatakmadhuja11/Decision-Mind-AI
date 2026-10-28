@@ -1066,58 +1066,72 @@ function renderResults(report) {
 // SUBMIT DECISION TO N8N
 // ========================================
 
+
 async function submitDecision(event) {
   event.preventDefault();
-
   $("#formError").classList.add("hidden");
 
+  // Collect the website form data.
   const payload = collectPayload();
-
   const errors = validatePayload(payload);
 
   if (errors.length) {
     showFormError(
-      "Please fix the following:\n• " +
-      errors.join("\n• ")
+      "Please fix the following:\n• " + errors.join("\n• ")
     );
-
     return;
   }
+
+  // Log the exact data being sent to n8n.
+  console.log("Webhook URL:", WEBHOOK_URL);
+  console.log("Request payload:", JSON.stringify(payload, null, 2));
+  console.log(
+    "Team perspectives count:",
+    payload.team_perspectives.length
+  );
 
   setLoading(true);
 
   try {
     const response = await fetch(WEBHOOK_URL, {
       method: "POST",
-
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Accept": "application/json"
       },
-
       body: JSON.stringify(payload)
     });
 
     const raw = await response.text();
 
+    console.log("n8n HTTP status:", response.status);
+    console.log("n8n response:", raw);
+
     let data;
 
     try {
-      data = raw ? JSON.parse(raw) : {};
+      data = raw ? JSON.parse(raw) : null;
     } catch {
-      data = {
-        response_text: raw
-      };
+      data = { response_text: raw };
     }
 
     if (!response.ok) {
-      throw new Error(
-        `n8n returned HTTP ${response.status}: ${
-          cleanText(
-            data.message ||
+      const details =
+        data && typeof data === "object"
+          ? data.message ||
             data.error ||
+            data.response_text ||
             raw
-          )
-        }`
+          : raw;
+
+      throw new Error(
+        `n8n returned HTTP ${response.status}: ${cleanText(details)}`
+      );
+    }
+
+    if (data == null || data === "") {
+      throw new Error(
+        "n8n returned an empty response. Check the Respond to Webhook node."
       );
     }
 
@@ -1125,37 +1139,29 @@ async function submitDecision(event) {
 
     if (
       !report ||
-      typeof report !== "object"
+      typeof report !== "object" ||
+      Array.isArray(report)
     ) {
       throw new Error(
-        "n8n did not return a JSON object. Check the Respond to Webhook node."
+        "n8n response is not a report JSON object. Check the Respond to Webhook node."
       );
     }
 
     renderResults(report);
 
   } catch (error) {
-    let message =
-      error.message ||
-      "Unknown request error.";
+    console.error("DecisionMind AI submission failed:", error);
+
+    let message = error.message || "Unknown request error.";
 
     if (error instanceof TypeError) {
       message =
-        "The browser could not read a response from n8n. " +
-        "This is usually caused by an incorrect webhook URL, " +
-        "an inactive workflow, a network issue, or CORS/preflight configuration.\n\n" +
-
-        "Check: (1) the n8n workflow is active, " +
-        "(2) the URL uses /webhook/ for production, " +
-        "(3) the Webhook node path is generate-team-report " +
-        "and method is POST, and " +
-        "(4) Allowed Origins (CORS) includes " +
-        "https://fatakmadhuja11.github.io.\n\n" +
-
-        "If you are testing with /webhook-test/, click " +
-        "'Listen for test event' in n8n first. " +
-        "Open browser DevTools > Network to see whether " +
-        "OPTIONS or POST is failing.";
+        "The browser could not read the n8n response. " +
+        "Check DevTools > Network for the POST request. " +
+        "Verify the production webhook URL, published workflow, " +
+        "and n8n CORS Allowed Origins. Include " +
+        "https://fatakmadhuja11.github.io. " +
+        "For /webhook-test/, click Listen for test event first.";
     }
 
     showFormError(message);
@@ -1164,6 +1170,7 @@ async function submitDecision(event) {
     setLoading(false);
   }
 }
+
 
 // ========================================
 // RESET FORM
