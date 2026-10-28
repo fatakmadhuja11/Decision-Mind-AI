@@ -3,7 +3,7 @@
  * 1. Paste your n8n production webhook URL into WEBHOOK_URL below.
  * 2. If testing in n8n, use the Test URL while the workflow is listening.
  */
-const WEBHOOK_URL = "PASTE_YOUR_N8N_WEBHOOK_URL_HERE";
+const WEBHOOK_URL = "https://decisionmind-ai.app.n8n.cloud/webhook-test/decisionmind";
 
 const CRITERIA = [
   { key: "cost_efficiency", label: "Cost efficiency", note: "Value for the available budget", value: 25 },
