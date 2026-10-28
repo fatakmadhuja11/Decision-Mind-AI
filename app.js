@@ -22,6 +22,7 @@ const DEFAULT_PERSPECTIVES = [
   { role: "Coordinator", view: "Prefer a project that can be completed on time" }
 ];
 let lastReport = null;
+let lastBalancedWeights = Object.fromEntries(CRITERIA.map(c => [c.key, c.value]));
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -82,6 +83,7 @@ function updateWeightTotal() {
   const total = values.reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0);
   $("#weightTotal").textContent = `${total}%`;
   const valid = allValid && total === 100;
+  if (valid) lastBalancedWeights = Object.fromEntries(CRITERIA.map((c, i) => [c.key, values[i]]));
   $("#weightTotal").classList.toggle("invalid", !valid);
   $("#weightMessage").textContent = valid
     ? "Your priorities are balanced."
@@ -90,6 +92,14 @@ function updateWeightTotal() {
       : `Weights must total exactly 100% (${total < 100 ? `${100-total}% more needed` : `${total-100}% over`}).`;
   $("#weightMessage").style.color = valid ? "" : "var(--red)";
   return valid;
+}
+function restoreLastBalancedWeights() {
+  CRITERIA.forEach(c => {
+    const value = String(lastBalancedWeights[c.key] ?? c.value);
+    $(`[data-weight-number="${c.key}"]`).value = value;
+    $(`[data-weight="${c.key}"]`).value = value;
+  });
+  updateWeightTotal();
 }
 function setWeightAndRebalance(changedKey, rawValue) {
   if (rawValue === "" || !Number.isInteger(Number(rawValue))) return updateWeightTotal();
@@ -347,6 +357,13 @@ $("#weights").addEventListener("input", e => {
 });
 $("#weights").addEventListener("change", e => {
   const number = e.target.closest("[data-weight-number]");
-  if (number) setWeightAndRebalance(number.dataset.weightNumber, number.value);
+  if (number) {
+    const value = number.value.trim();
+    if (value === "" || !Number.isInteger(Number(value)) || Number(value) < 0 || Number(value) > 100) {
+      restoreLastBalancedWeights();
+    } else {
+      setWeightAndRebalance(number.dataset.weightNumber, value);
+    }
+  }
 });
 renderAlternatives(); renderPerspectives(); renderWeights();
