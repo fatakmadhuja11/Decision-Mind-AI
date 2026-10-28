@@ -18,8 +18,8 @@ const DEFAULT_ALTERNATIVES = [
   { id: "C", name: "Multi-Agent Decision System", description: "A decision support system using multiple AI agents", known_cost: "" }
 ];
 const DEFAULT_PERSPECTIVES = [
-  { role: "Developer", view: "Prefer technical complexity and learning opportunities" },
-  { role: "Coordinator", view: "Prefer a project that can be completed on time" }
+  { name: "", role: "", preferred_alternative: "", view: "", concerns: "", confidence: 3 },
+  { name: "", role: "", preferred_alternative: "", view: "", concerns: "", confidence: 3 }
 ];
 let lastReport = null;
 let lastBalancedWeights = Object.fromEntries(CRITERIA.map(c => [c.key, c.value]));
@@ -45,11 +45,17 @@ function renderAlternatives(items = DEFAULT_ALTERNATIVES) {
 function renderPerspectives(items = DEFAULT_PERSPECTIVES) {
   $("#perspectives").innerHTML = items.map((p, i) => `
     <div class="dynamic-card perspective-card">
-      <div class="dynamic-card-head"><div class="item-index"><span class="index-badge">${i + 1}</span> Team perspective ${i + 1}</div>
-      <button type="button" class="remove-btn" data-remove-perspective="${i}" aria-label="Remove perspective ${i + 1}">Remove ×</button></div>
+      <div class="dynamic-card-head"><div class="item-index"><span class="index-badge">${i + 1}</span> Team member ${i + 1}</div>
+      <button type="button" class="remove-btn" data-remove-perspective="${i}" aria-label="Remove team member ${i + 1}">Remove ×</button></div>
       <div class="dynamic-fields">
-        <input class="perspective-role" aria-label="Role ${i + 1}" placeholder="Role or person" maxlength="100" value="${esc(p.role)}">
-        <textarea class="perspective-view" aria-label="Perspective ${i + 1}" placeholder="What matters to this person?" maxlength="1000">${esc(p.view)}</textarea>
+        <input class="perspective-name" aria-label="Member name ${i + 1}" placeholder="Member name (required when submitting)" maxlength="100" value="${esc(p.name || "")}">
+        <input class="perspective-role" aria-label="Role ${i + 1}" placeholder="Role (e.g. developer, designer)" maxlength="100" value="${esc(p.role || "")}">
+        <input class="perspective-preference" aria-label="Preferred alternative ${i + 1}" placeholder="Preferred option (e.g. AI Chatbot)" maxlength="120" value="${esc(p.preferred_alternative || "")}">
+        <textarea class="perspective-view" aria-label="Opinion ${i + 1}" placeholder="Your opinion and reasons (required when submitting)" maxlength="1500">${esc(p.view || "")}</textarea>
+        <textarea class="perspective-concerns" aria-label="Concerns ${i + 1}" placeholder="Concerns, risks, or disadvantages (optional)" maxlength="1000">${esc(p.concerns || "")}</textarea>
+        <label class="confidence-field">Confidence (1 = low, 5 = high)
+          <input class="perspective-confidence" type="number" min="1" max="5" step="1" value="${esc(p.confidence ?? 3)}" aria-label="Confidence level ${i + 1}">
+        </label>
       </div>
     </div>`).join("");
 }
@@ -146,8 +152,15 @@ function addAlternative() {
   renderAlternatives(items);
 }
 function addPerspective() {
-  const items = $$(".perspective-card").map(card => ({ role: $(".perspective-role", card).value, view: $(".perspective-view", card).value }));
-  items.push({ role: "", view: "" });
+  const items = $(".perspective-card").map(card => ({
+    name: $(".perspective-name", card).value,
+    role: $(".perspective-role", card).value,
+    preferred_alternative: $(".perspective-preference", card).value,
+    view: $(".perspective-view", card).value,
+    concerns: $(".perspective-concerns", card).value,
+    confidence: $(".perspective-confidence", card).value
+  }));
+  items.push({ name: "", role: "", preferred_alternative: "", view: "", concerns: "", confidence: 3 });
   renderPerspectives(items);
 }
 function collectPayload() {
@@ -161,10 +174,17 @@ function collectPayload() {
     if (costRaw !== "") alt.known_cost = Number(costRaw);
     return alt;
   });
-  const team_perspectives = $$(".perspective-card").map(card => ({
-    role: $(".perspective-role", card).value.trim(),
-    view: $(".perspective-view", card).value.trim()
-  })).filter(p => p.role || p.view);
+  const team_perspectives = $(".perspective-card").map(card => {
+    const confidenceRaw = $(".perspective-confidence", card).value.trim();
+    return {
+      name: $(".perspective-name", card).value.trim(),
+      role: $(".perspective-role", card).value.trim(),
+      preferred_alternative: $(".perspective-preference", card).value.trim(),
+      view: $(".perspective-view", card).value.trim(),
+      concerns: $(".perspective-concerns", card).value.trim(),
+      confidence: confidenceRaw === "" ? null : Number(confidenceRaw)
+    };
+  }).filter(p => p.name || p.role || p.preferred_alternative || p.view || p.concerns);
   const budgetRaw = $("#budget").value.trim(), deadlineRaw = $("#deadline").value.trim(), teamRaw = $("#teamSize").value.trim();
   const payload = {
     problem: $("#problem").value.trim(),
@@ -189,6 +209,11 @@ function validatePayload(payload) {
   if (payload.budget !== undefined && (!Number.isFinite(payload.budget) || payload.budget <= 0)) errors.push("Budget must be greater than zero, or leave it blank.");
   if (payload.deadline_weeks !== undefined && (!Number.isFinite(payload.deadline_weeks) || payload.deadline_weeks <= 0)) errors.push("Deadline must be greater than zero, or leave it blank.");
   if (payload.team_size !== undefined && (!Number.isInteger(payload.team_size) || payload.team_size <= 0)) errors.push("Team size must be a positive whole number, or leave it blank.");
+  payload.team_perspectives.forEach((p, i) => {
+    if (!p.name) errors.push(`Team member ${i + 1}: enter the member name.`);
+    if (!p.view) errors.push(`Team member ${i + 1}: enter their opinion and reasons.`);
+    if (p.confidence !== null && (!Number.isInteger(p.confidence) || p.confidence < 1 || p.confidence > 5)) errors.push(`Team member ${i + 1}: confidence must be a whole number from 1 to 5.`);
+  });
   if (!updateWeightTotal()) errors.push("Criteria weights must total exactly 100%.");
   return errors;
 }
