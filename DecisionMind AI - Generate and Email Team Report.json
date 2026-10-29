@@ -1,0 +1,275 @@
+{
+  "name": "DecisionMind AI - Generate and Email Team Report",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-team-report",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "https://fatakmadhuja11.github.io"
+        }
+      },
+      "id": "e3cb060b-ef42-4f25-beac-ec3d94e7f345",
+      "name": "Webhook - Generate Team Report",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "60aff6ea-e331-47af-9468-37b7545f9f7c"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1qZvIQMtKWqc-TBQhJKn8riphwR8AM7kIfZZIyste4nA",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "0",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "4b74b5e5-9535-4069-ae94-082914a66bd8",
+      "name": "Google Sheets - Get Opinions",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        0
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "dZpSmeUSNZKdwKNK",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Select your Google Sheets credential and replace the spreadsheet ID. This reads rows from the Opinions tab; the Code node filters them by DecisionID."
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst webhook = $('Webhook - Generate Team Report').first().json;\n\nlet body = webhook.body ?? webhook;\n\n// Handle a body that arrives as a JSON string.\nif (typeof body === 'string') {\n  body = JSON.parse(body);\n}\n\nconst decisionId = body.decisionId;\n\nif (!decisionId) {\n  throw new Error(\n    'Missing decisionId. Check the Webhook payload.'\n  );\n}\n\n// Read opinions submitted by the website.\nconst perspectives = Array.isArray(body.team_perspectives)\n  ? body.team_perspectives\n  : [];\n\nif (perspectives.length === 0) {\n  throw new Error(\n    'No team_perspectives received from the website. ' +\n    'Inspect Webhook - Generate Team Report output.'\n  );\n}\n\n// Prepare the submitted opinions for Gemini.\n// Do not filter against old Google Sheets DecisionIDs.\nconst opinions = perspectives.map(member => ({\n  memberName: member.name ?? '',\n  email: member.email ?? '',\n  role: member.role ?? '',\n  preferredAlternative: member.preferred_alternative ?? '',\n  reasoning: member.view ?? '',\n  concerns: member.concerns ?? '',\n  confidence: member.confidence ?? ''\n}));\n\nconst emails = [\n  ...new Set(\n    opinions\n      .map(opinion => String(opinion.email).trim())\n      .filter(email =>\n        email &&\n        email !== 'member1@example.com' &&\n        /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)\n      )\n  )\n];\n\nreturn [{\n  json: {\n    decisionId,\n    submittedAt: body.submittedAt ?? new Date().toISOString(),\n    problem: body.problem ?? '',\n    context: body.context ?? '',\n    alternatives: body.alternatives ?? [],\n    criteria_weights: body.criteria_weights ?? {},\n    opinionCount: opinions.length,\n    opinions,\n    emails\n  }\n}];\n"
+      },
+      "id": "64307fe6-eed7-496b-9afd-4f51c81c3e87",
+      "name": "Code - Prepare Team Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        0
+      ],
+      "notesInFlow": true,
+      "notes": "Your Opinions sheet must include DecisionID, Problem, MemberName, Role, PreferredAlternative, Reasoning, Concerns, Confidence, and Email columns."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-goog-api-key",
+              "value": "AQ.Ab8RN6KYqr4FpQTp3fJMrCEIDkgrGIaS5NEnNQyeLZ1Z63ja9w"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { contents: [{ parts: [{ text: 'You are DecisionMind AI, a neutral team decision assistant. Create a professional report with: 1) decision problem, 2) each member\\'s preferred alternative and reasoning, 3) agreements and disagreements, 4) risks and concerns, 5) advantages and disadvantages, 6) possible compromise, 7) recommendation with reasons, 8) suggested next steps. Do not invent facts. State uncertainties. The team makes the final decision.\\n\\nTeam data:\\n' + JSON.stringify($json) }] }] } }}",
+        "options": {}
+      },
+      "id": "c5b2c4ae-3283-4ec5-8744-0f70e67496ae",
+      "name": "HTTP Request - Gemini Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        0
+      ],
+      "notesInFlow": true,
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "maxTries": 3,
+      "notes": "Create an n8n Header Auth credential with header name x-goog-api-key and your Gemini API key as the value. Do not paste the API key into this workflow JSON."
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $input.first().json;\n\nconst report =\n  response.candidates?.[0]?.content?.parts\n    ?.map(part => part.text ?? '')\n    .join('\\n')\n    .trim();\n\nif (!report) {\n  throw new Error('Gemini did not return a report.');\n}\n\nconst previous = $('Code - Prepare Team Data').first().json;\n\nreturn [{\n  json: {\n    decisionId: previous.decisionId,\n    problem: previous.problem,\n    emails: previous.emails,\n    report\n  }\n}];\n"
+      },
+      "id": "e47cc198-0e49-400d-87e0-a32f660c18cd",
+      "name": "Code - Extract Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "report",
+        "options": {
+          "fileName": "=DecisionReport_DM001.txt"
+        }
+      },
+      "id": "7d914691-18ca-475f-a9bf-f8d834dc4af5",
+      "name": "Convert to File - Report TXT",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        1264,
+        0
+      ],
+      "notesInFlow": true,
+      "notes": "Creates a text report attachment. This is the simplest importable version; PDF conversion can be added later."
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ ($('Code - Extract Report').first().json.emails || []).filter(Boolean).join(',') }}",
+        "toEmail": "={{ $('Code - Extract Report').first().json.emails.join(',') }}",
+        "subject": "DecisionMind AI - Team Decision Report",
+        "emailFormat": "text",
+        "text": "Hello Team,\n\nPlease find attached the DecisionMind AI team decision report. It summarizes the submitted viewpoints, disagreements, risks, and suggested next steps.\n\nPlease review it together and make the final decision as a team.\n\nRegards,\nDecisionMind AI",
+        "options": {
+          "attachments": "data"
+        }
+      },
+      "id": "2ed4739c-b7f8-4f1e-82ab-c36eb6efae1a",
+      "name": "Send Email - Report to Team",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1504,
+        0
+      ],
+      "notesInFlow": true,
+      "webhookId": "bd7ee762-d38b-45b8-8f19-2028eaea4e8f",
+      "credentials": {
+        "smtp": {
+          "id": "hSDfQHIBFMprxFNe",
+          "name": "SMTP account"
+        }
+      },
+      "notes": "Configure SMTP credentials and replace YOUR_VERIFIED_SENDER_EMAIL. The workflow sends one email to the unique email addresses found in the matching decision rows."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, message: 'Team report generated and email delivery requested.', decisionId: $('Code - Extract Report').first().json.decisionId } }}",
+        "options": {}
+      },
+      "id": "6d48d602-3c8f-4a34-b154-310379ac082b",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1744,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - Generate Team Report": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Get Opinions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Get Opinions": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Team Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Team Data": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Gemini Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Gemini Analysis": {
+      "main": [
+        [
+          {
+            "node": "Code - Extract Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Extract Report": {
+      "main": [
+        [
+          {
+            "node": "Convert to File - Report TXT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File - Report TXT": {
+      "main": [
+        [
+          {
+            "node": "Send Email - Report to Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email - Report to Team": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "a127b097-0baf-4ee4-a254-bce09d13ab2d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "518a7fc8c4139a42122bb740fc1bfbfffc803aea1bfe81846b45efedccec68d2"
+  },
+  "nodeGroups": [],
+  "id": "P6Sjvm7AYZ8hBuPi",
+  "tags": []
+}
